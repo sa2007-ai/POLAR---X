@@ -244,7 +244,7 @@ export const MapPage: React.FC = () => {
               onChange={(e) => setSelectedStation(e.target.value)}
               className="px-3 py-1.5 bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded-lg text-white font-mono focus:outline-none"
             >
-              <option value="All Stations">Global Polar View</option>
+              <option value="All Stations">Antarctic Overview (All Stations)</option>
               {stations.map((st) => (
                 <option key={st.id} value={st.name}>
                   {st.name}

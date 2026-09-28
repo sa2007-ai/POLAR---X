@@ -9,8 +9,12 @@ import {
   AlertTriangle,
   Flame,
   Info,
-  Crosshair
+  Crosshair,
+  Map as MapIcon,
+  Truck
 } from 'lucide-react';
+
+export type GoogleMapType = 'roadmap' | 'satellite' | 'hybrid' | 'terrain';
 
 interface PolarGoogleMapProps {
   stations: PolarStation[];
@@ -30,38 +34,6 @@ interface PolarGoogleMapProps {
   };
 }
 
-// Dark Navy Polar Custom Style for Google Maps
-const POLAR_DARK_MAP_STYLES: google.maps.MapTypeStyle[] = [
-  { elementType: 'geometry', stylers: [{ color: '#091322' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#091322' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#64748b' }] },
-  {
-    featureType: 'administrative.country',
-    elementType: 'geometry.stroke',
-    stylers: [{ color: '#1e293b' }]
-  },
-  {
-    featureType: 'landscape',
-    elementType: 'geometry',
-    stylers: [{ color: '#0b192c' }]
-  },
-  {
-    featureType: 'water',
-    elementType: 'geometry',
-    stylers: [{ color: '#030712' }]
-  },
-  {
-    featureType: 'water',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#38bdf8' }]
-  },
-  {
-    featureType: 'poi',
-    elementType: 'geometry',
-    stylers: [{ color: '#0f172a' }]
-  }
-];
-
 export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
   stations,
   expeditions,
@@ -75,18 +47,19 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
-  const markersRef = useRef<any[]>([]);
-  const overlaysRef = useRef<any[]>([]);
+  const markersRef = useRef<google.maps.Marker[]>([]);
+  const overlaysRef = useRef<(google.maps.Polygon | google.maps.Circle)[]>([]);
 
   const [mapsLoaded, setMapsLoaded] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedEntity, setSelectedEntity] = useState<any | null>(null);
   const [hoveredCoords, setHoveredCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [currentMapType, setCurrentMapType] = useState<GoogleMapType>('roadmap');
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   const isKeyConfigured = Boolean(apiKey && !apiKey.includes('your_google_maps'));
 
-  // Initialize Google Maps JavaScript SDK
+  // Initialize Standard Google Maps JavaScript SDK
   useEffect(() => {
     if (!isKeyConfigured || !mapContainerRef.current) {
       return;
@@ -104,27 +77,49 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
         await importLibrary('maps');
         if (!isMounted || !mapContainerRef.current) return;
 
-        const defaultCenter = { lat: -70.762, lng: 11.741 }; // Maitri Station (Antarctica)
+        // Antarctic operational area default center: Maitri Station / Queen Maud Land
+        const defaultCenter = { lat: -70.762, lng: 11.741 };
 
+        // Standard Google Maps instance (no custom dark map styles, real basemap with geographic labels and coastlines)
         const map = new google.maps.Map(mapContainerRef.current, {
           center: defaultCenter,
-          zoom: 5,
-          mapTypeId: 'terrain',
-          styles: POLAR_DARK_MAP_STYLES,
+          zoom: 4,
+          mapTypeId: google.maps.MapTypeId.ROADMAP,
           disableDefaultUI: false,
           zoomControl: true,
-          streetViewControl: false,
+          streetViewControl: true,
           mapTypeControl: true,
+          mapTypeControlOptions: {
+            style: google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
+            position: google.maps.ControlPosition.TOP_LEFT,
+            mapTypeIds: [
+              google.maps.MapTypeId.ROADMAP,
+              google.maps.MapTypeId.SATELLITE,
+              google.maps.MapTypeId.HYBRID,
+              google.maps.MapTypeId.TERRAIN
+            ]
+          },
           fullscreenControl: true,
-          backgroundColor: '#030712'
+          scaleControl: true,
+          rotateControl: true
         });
 
+        // Listen for user cursor position on the real map
         map.addListener('mousemove', (e: google.maps.MapMouseEvent) => {
           if (e.latLng && isMounted) {
             setHoveredCoords({
               lat: Number(e.latLng.lat().toFixed(4)),
               lng: Number(e.latLng.lng().toFixed(4))
             });
+          }
+        });
+
+        // Sync state when user changes map type via native Google controls
+        map.addListener('maptypeid_changed', () => {
+          if (!isMounted) return;
+          const newType = map.getMapTypeId() as GoogleMapType;
+          if (newType) {
+            setCurrentMapType(newType);
           }
         });
 
@@ -135,7 +130,7 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
         }
       } catch (err: any) {
         if (!isMounted) return;
-        console.warn('Google Maps JS API load failed. Falling back to Tactical Polar Grid view.', err);
+        console.warn('[POLAR-X] Google Maps JS API initialization error:', err);
         setLoadError(err?.message || 'Unable to load Google Maps SDK');
       }
     };
@@ -150,6 +145,10 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
   // Center on selected station when filter changes
   useEffect(() => {
     if (!mapInstanceRef.current || !selectedStationName || selectedStationName === 'All Stations') {
+      if (mapInstanceRef.current && selectedStationName === 'All Stations') {
+        mapInstanceRef.current.panTo({ lat: -70.762, lng: 11.741 });
+        mapInstanceRef.current.setZoom(4);
+      }
       return;
     }
     const matched = stations.find((s) => s.name === selectedStationName);
@@ -162,18 +161,26 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
     }
   }, [selectedStationName, stations]);
 
+  // Handle map type change from UI buttons
+  const handleSetMapType = (type: GoogleMapType) => {
+    setCurrentMapType(type);
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.setMapTypeId(type);
+    }
+  };
+
   // Draw Markers, Overlays, Traverses & Geofences on Google Maps
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !mapsLoaded || typeof google === 'undefined') return;
 
     // Clear previous markers and overlays
-    markersRef.current.forEach((m) => m.setMap && m.setMap(null));
-    overlaysRef.current.forEach((o) => o.setMap && o.setMap(null));
+    markersRef.current.forEach((m) => m.setMap(null));
+    overlaysRef.current.forEach((o) => o.setMap(null));
     markersRef.current = [];
     overlaysRef.current = [];
 
-    // 1. BASE STATIONS LAYER
+    // 1. BASE STATIONS LAYER (Standard Google Maps Markers with clear badges)
     if (activeLayers.stations) {
       stations.forEach((station) => {
         const marker = new google.maps.Marker({
@@ -183,9 +190,9 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
           icon: {
             path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
             scale: 6,
-            fillColor: '#22d3ee',
+            fillColor: '#0284c7', // Sky blue for station base
             fillOpacity: 1,
-            strokeColor: '#082f49',
+            strokeColor: '#ffffff',
             strokeWeight: 2
           }
         });
@@ -213,7 +220,7 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
           icon: {
             path: google.maps.SymbolPath.CIRCLE,
             scale: isExpActive ? 7 : 5,
-            fillColor: isExpActive ? '#38bdf8' : '#94a3b8',
+            fillColor: isExpActive ? '#10b981' : '#64748b', // Emerald for active, slate for planned
             fillOpacity: 1,
             strokeColor: '#ffffff',
             strokeWeight: isExpActive ? 2 : 1
@@ -230,7 +237,45 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
       });
     }
 
-    // 3. GEOFENCES LAYER (Polygons & Circles)
+    // 3. ASSETS & VEHICLES LAYER
+    if (activeLayers.assets) {
+      assets.forEach((asset, idx) => {
+        // Associate asset coordinates with station if not standalone
+        const matchedStation = stations.find((s) => s.name.includes(asset.currentStation.split(' ')[0]));
+        if (matchedStation) {
+          const latOffset = ((idx % 3) - 1) * 0.03;
+          const lngOffset = (Math.floor(idx / 3) * 0.04) + 0.02;
+          const pos = {
+            lat: matchedStation.coordinates.lat + latOffset,
+            lng: matchedStation.coordinates.lng + lngOffset
+          };
+
+          const assetMarker = new google.maps.Marker({
+            position: pos,
+            map,
+            title: `${asset.assetTag} - ${asset.name} (${asset.status})`,
+            icon: {
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 4,
+              fillColor: '#f59e0b', // Amber for vehicles & assets
+              fillOpacity: 0.9,
+              strokeColor: '#000000',
+              strokeWeight: 1
+            }
+          });
+
+          assetMarker.addListener('click', () => {
+            const entity = { ...asset, entityType: 'asset', coordinates: pos };
+            setSelectedEntity(entity);
+            if (onSelectEntity) onSelectEntity(entity);
+          });
+
+          markersRef.current.push(assetMarker);
+        }
+      });
+    }
+
+    // 4. GEOFENCES LAYER (Polygons & Circles)
     if (activeLayers.geofences) {
       geofences.forEach((zone) => {
         if (zone.status === 'inactive') return;
@@ -260,7 +305,7 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
           });
 
           overlaysRef.current.push(polygon);
-        } else if (zone.shape === 'circle' && zone.radiusMeters) {
+        } else if (zone.shape === 'circle' && zone.center && zone.radiusMeters) {
           const circle = new google.maps.Circle({
             center: zone.center,
             radius: zone.radiusMeters,
@@ -283,12 +328,11 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
       });
     }
 
-    // 4. EMERGENCIES LAYER
+    // 5. EMERGENCIES LAYER
     if (activeLayers.emergencies) {
       emergencies.forEach((emg) => {
         if (emg.status === 'RESOLVED' || emg.status === 'CLOSED') return;
 
-        // Approximate station coordinate for emergency if not specific
         const matchedStation = stations.find((s) => emg.stationOrRegion.includes(s.name.split(' ')[0]));
         const pos = matchedStation
           ? {
@@ -322,11 +366,10 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
     }
   }, [mapsLoaded, stations, expeditions, assets, emergencies, geofences, activeLayers, onSelectEntity]);
 
-  // Tactical Polar Canvas Fallback Map for zero-key / offline demo scenarios
+  // Tactical Canvas Fallback Map for zero-key scenarios
   const renderTacticalCanvasFallback = () => {
     return (
       <div className="relative w-full h-full min-h-[500px] bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden flex flex-col justify-between p-4">
-        {/* Background Coordinate Grid */}
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-cyan-950/20 via-slate-950 to-slate-950 pointer-events-none" />
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#082f4920_1px,transparent_1px),linear-gradient(to_bottom,#082f4920_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none" />
 
@@ -344,19 +387,17 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
               Antarctic Sector: 60°S - 90°S
             </span>
             <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/30">
-              GPS LOCK: ACTIVE
+              GPS LOCK: ACTIVE (SIMULATED)
             </span>
           </div>
         </div>
 
         {/* Tactical Canvas Map Plotter */}
         <div className="relative flex-1 my-4 flex items-center justify-center">
-          {/* Radar Circles */}
           <div className="absolute w-96 h-96 rounded-full border border-cyan-500/20 animate-pulse pointer-events-none" />
           <div className="absolute w-72 h-72 rounded-full border border-cyan-500/30 pointer-events-none" />
           <div className="absolute w-44 h-44 rounded-full border border-cyan-500/40 pointer-events-none" />
 
-          {/* Plotted Stations & Geofences on Canvas */}
           <div className="relative w-full h-full max-w-2xl max-h-[380px] border border-slate-800/80 rounded-2xl bg-slate-900/40 p-4">
             {/* Base Stations */}
             {activeLayers.stations &&
@@ -451,7 +492,7 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
           <div className="flex items-center gap-2">
             <Info className="w-4 h-4 text-cyan-400" />
             <span>
-              Google Maps API Key not detected in environment (`VITE_GOOGLE_MAPS_API_KEY`). Displaying high-precision Tactical Polar Mesh.
+              Google Maps API Key not configured in environment (`VITE_GOOGLE_MAPS_API_KEY`). Displaying Tactical Polar Radar fallback.
             </span>
           </div>
           <span className="text-cyan-400 font-bold">READY FOR DEPLOYMENT</span>
@@ -462,16 +503,72 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
 
   return (
     <div className="relative w-full h-full min-h-[600px] flex flex-col rounded-2xl overflow-hidden border border-slate-800 bg-slate-950">
+      {/* Top Floating Map Type Selector Toolbar */}
+      {isKeyConfigured && !loadError && (
+        <div className="absolute top-4 left-4 z-20 flex items-center bg-slate-900/90 border border-slate-700/80 rounded-xl p-1 backdrop-blur-md shadow-xl text-xs font-mono">
+          <div className="flex items-center gap-1">
+            <span className="px-2 text-slate-400 font-bold hidden sm:inline-flex items-center gap-1">
+              <MapIcon className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Map Type:</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => handleSetMapType('roadmap')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                currentMapType === 'roadmap'
+                  ? 'bg-cyan-400 text-slate-950 shadow-sm'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              Roadmap
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetMapType('satellite')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                currentMapType === 'satellite'
+                  ? 'bg-cyan-400 text-slate-950 shadow-sm'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              Satellite
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetMapType('hybrid')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                currentMapType === 'hybrid'
+                  ? 'bg-cyan-400 text-slate-950 shadow-sm'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              Hybrid
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetMapType('terrain')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                currentMapType === 'terrain'
+                  ? 'bg-cyan-400 text-slate-950 shadow-sm'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              Terrain
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Live Map or Tactical Fallback Container */}
       {isKeyConfigured && !loadError ? (
-        <div ref={mapContainerRef} className="w-full h-full min-h-[600px] flex-1 bg-slate-950" />
+        <div ref={mapContainerRef} className="w-full h-full min-h-[600px] flex-1" />
       ) : (
         renderTacticalCanvasFallback()
       )}
 
       {/* Floating Active Breach Alert Banner */}
       {breaches.length > 0 && (
-        <div className="absolute top-4 left-4 right-4 sm:right-auto z-20 max-w-md p-3.5 bg-rose-950/90 border border-rose-500/70 rounded-xl shadow-2xl backdrop-blur-md animate-pulse space-y-1">
+        <div className="absolute top-16 left-4 right-4 sm:right-auto z-20 max-w-md p-3.5 bg-rose-950/90 border border-rose-500/70 rounded-xl shadow-2xl backdrop-blur-md animate-pulse space-y-1">
           <div className="flex items-center gap-2 text-xs font-bold text-white">
             <Flame className="w-4 h-4 text-rose-400 animate-bounce" />
             <span>ACTIVE GEOFENCE HAZARD BREACH DETECTED ({breaches.length})</span>
@@ -506,16 +603,18 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
                   <AlertTriangle className="w-4 h-4 text-amber-400" />
                 ) : selectedEntity.entityType === 'emergency' ? (
                   <ShieldAlert className="w-4 h-4 text-rose-400" />
+                ) : selectedEntity.entityType === 'asset' ? (
+                  <Truck className="w-4 h-4 text-amber-400" />
                 ) : (
                   <Compass className="w-4 h-4" />
                 )}
               </span>
               <div>
                 <h4 className="text-xs font-bold text-white font-sans uppercase">
-                  {selectedEntity.name || selectedEntity.title || selectedEntity.code}
+                  {selectedEntity.name || selectedEntity.title || selectedEntity.code || selectedEntity.assetTag}
                 </h4>
                 <span className="text-[10px] font-mono text-cyan-400">
-                  {selectedEntity.entityType?.toUpperCase()} TELEMETRY
+                  {selectedEntity.entityType?.toUpperCase()} OVERLAY
                 </span>
               </div>
             </div>
@@ -533,14 +632,14 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
               <>
                 <div className="flex justify-between p-2 rounded-lg bg-slate-950">
                   <span className="text-slate-400">Coordinates:</span>
-                  <span className="text-white font-bold">{selectedEntity.coordinates?.formatted}</span>
+                  <span className="text-white font-bold">{selectedEntity.coordinates?.formatted || `${selectedEntity.coordinates?.lat}°S, ${selectedEntity.coordinates?.lng}°E`}</span>
                 </div>
                 <div className="flex justify-between p-2 rounded-lg bg-slate-950">
                   <span className="text-slate-400">Current Temperature:</span>
                   <span className="text-cyan-300 font-bold">{selectedEntity.currentTemp}°C</span>
                 </div>
                 <div className="flex justify-between p-2 rounded-lg bg-slate-950">
-                  <span className="text-slate-400">Satellite Uplink:</span>
+                  <span className="text-slate-400">Satellite Link:</span>
                   <span className="text-emerald-400 font-bold">{selectedEntity.satelliteUplinkMbps} Mbps</span>
                 </div>
               </>
@@ -589,6 +688,23 @@ export const PolarGoogleMap: React.FC<PolarGoogleMapProps> = ({
                 <div className="flex justify-between p-2 rounded-lg bg-slate-950">
                   <span className="text-slate-400">Progress:</span>
                   <span className="text-emerald-400 font-bold">{selectedEntity.progressPercent}%</span>
+                </div>
+              </>
+            )}
+
+            {selectedEntity.entityType === 'asset' && (
+              <>
+                <div className="flex justify-between p-2 rounded-lg bg-slate-950">
+                  <span className="text-slate-400">Category:</span>
+                  <span className="text-white font-bold">{selectedEntity.category}</span>
+                </div>
+                <div className="flex justify-between p-2 rounded-lg bg-slate-950">
+                  <span className="text-slate-400">Status:</span>
+                  <span className="text-emerald-400 font-bold">{selectedEntity.status}</span>
+                </div>
+                <div className="flex justify-between p-2 rounded-lg bg-slate-950">
+                  <span className="text-slate-400">Health Score:</span>
+                  <span className="text-cyan-300 font-bold">{selectedEntity.healthScore}%</span>
                 </div>
               </>
             )}
