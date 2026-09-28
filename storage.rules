@@ -1,0 +1,39 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // User profile avatars and credentials
+    match /users/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Mission reports, field photos, and attachments
+    match /expeditions/{expeditionId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.resource.size < 25 * 1024 * 1024; // 25MB max
+    }
+    
+    // UAV imagery and 3D crevasse reconstruction scans
+    match /uavScans/{scanId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.resource.size < 50 * 1024 * 1024; // 50MB max
+    }
+    
+    // Telemetry and raw sensor data dumps
+    match /telemetryDumps/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+    
+    // Emergency incident photos and attachments
+    match /emergencies/{emergencyId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+  }
+}

@@ -1,0 +1,299 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function userExists(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid));
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function hasRole(role) {
+      return isAuthenticated() && userExists(request.auth.uid) && getUserData().role == role;
+    }
+    
+    function isAdmin() {
+      return hasRole('ADMIN');
+    }
+    
+    function isExpeditionManager() {
+      return isAdmin() || hasRole('EXPEDITION_MANAGER');
+    }
+    
+    function isLogisticsOfficer() {
+      return isAdmin() || hasRole('LOGISTICS_OFFICER');
+    }
+    
+    function isScientist() {
+      return isAdmin() || hasRole('SCIENTIST');
+    }
+    
+    function isMedicalOfficer() {
+      return isAdmin() || hasRole('MEDICAL_OFFICER');
+    }
+    
+    function isViewer() {
+      return isAuthenticated();
+    }
+    
+    // USERS COLLECTION
+    // Users can read profile directory;
+    // Initial profile creation accepts valid operational role;
+    // Post-creation role modifications are strictly restricted to ADMIN.
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (
+        (
+          request.auth.uid == userId &&
+          request.resource.data.role in ['ADMIN', 'EXPEDITION_MANAGER', 'LOGISTICS_OFFICER', 'SCIENTIST', 'MEDICAL_OFFICER', 'VIEWER']
+        ) ||
+        isAdmin()
+      );
+      allow update: if isAuthenticated() && (
+        (
+          request.auth.uid == userId &&
+          request.resource.data.role == resource.data.role &&
+          (!('approvalStatus' in request.resource.data) || !('approvalStatus' in resource.data) || request.resource.data.approvalStatus == resource.data.approvalStatus)
+        ) ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+    
+    // EXPEDITIONS COLLECTION
+    match /expeditions/{expeditionId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isExpeditionManager() || isScientist();
+      allow delete: if isAdmin() || isExpeditionManager();
+    }
+    
+    // PERSONNEL COLLECTION
+    match /personnel/{personnelId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isExpeditionManager() || isMedicalOfficer();
+      allow delete: if isAdmin() || isExpeditionManager();
+    }
+    
+    // CARGO COLLECTION
+    match /cargo/{cargoId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isExpeditionManager() || isLogisticsOfficer();
+      allow delete: if isAdmin() || isExpeditionManager() || isLogisticsOfficer();
+    }
+    
+    // INVENTORY COLLECTION
+    match /inventory/{itemId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin() || isLogisticsOfficer();
+    }
+    
+    // ASSETS COLLECTION
+    match /assets/{assetId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isExpeditionManager() || isLogisticsOfficer();
+      allow delete: if isAdmin() || isExpeditionManager();
+    }
+    
+    // EMERGENCIES COLLECTION
+    match /emergencies/{emergencyId} {
+      allow read: if isAuthenticated();
+      // Any authenticated operator can report an emergency (create)
+      allow create: if isAuthenticated();
+      allow update: if isAdmin() || isExpeditionManager() || isMedicalOfficer();
+      allow delete: if isAdmin();
+    }
+    
+    // NOTIFICATIONS COLLECTION
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+    
+    // GEOFENCES COLLECTION
+    match /geofences/{geofenceId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isExpeditionManager();
+      allow delete: if isAdmin();
+    }
+    
+    // TRAVERSE ROUTES COLLECTION
+    match /routes/{routeId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() || isExpeditionManager() || isScientist() || isLogisticsOfficer();
+      allow update: if isAdmin() || isExpeditionManager() || isScientist() || isLogisticsOfficer();
+      allow delete: if isAdmin() || isExpeditionManager();
+    }
+    
+    // CONFLICTS COLLECTION
+    match /conflicts/{conflictId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAdmin() || isExpeditionManager();
+      allow delete: if isAdmin();
+    }
+
+    // WEATHER & SOLAR SNAPSHOTS COLLECTION
+    match /weatherSnapshots/{snapshotId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    match /solarSnapshots/{snapshotId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+    
+    // TELEMETRY COLLECTION
+    match /telemetry/{telemetryId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    // UAV SCOUTING & DETECTIONS
+    match /uavMissions/{missionId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isExpeditionManager() || isScientist();
+      allow delete: if isAdmin() || isExpeditionManager();
+    }
+
+    match /uavDetections/{detectionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin() || isExpeditionManager();
+    }
+
+    // CONVOYS COLLECTION
+    match /convoys/{convoyId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isExpeditionManager() || isLogisticsOfficer();
+      allow delete: if isAdmin() || isExpeditionManager();
+    }
+
+    // MAP PACKS METADATA
+    match /mapPacks/{packId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // EDGE AI NEURAL MODELS & INFERENCE DETECTIONS
+    match /aiModels/{modelId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin() || isExpeditionManager() || isScientist();
+    }
+
+    match /aiDetections/{detectionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin() || isExpeditionManager() || isScientist();
+    }
+
+    // LOW-BANDWIDTH EMERGENCY RADIO MESSAGES & LOGS
+    match /emergencyMessages/{messageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin() || isExpeditionManager() || isMedicalOfficer();
+    }
+
+    match /communicationLogs/{logId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false; // Append-only immutable radio logs
+      allow delete: if isAdmin();
+    }
+
+    // PHASE 8: DEVICE REGISTRY & HARDWARE INTERFACES
+    match /devices/{deviceId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isExpeditionManager() || isLogisticsOfficer();
+      allow delete: if isAdmin();
+    }
+
+    // PHASE 8: WEARABLE BIOMETRIC TELEMETRY
+    match /wearableTelemetry/{telemetryId} {
+      // Sensitive personnel biometrics only accessible to authenticated users (non-Viewer privileged or assigned medical)
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin() || isMedicalOfficer();
+    }
+
+    // PHASE 8: UNIFIED COMMUNICATION & FAILOVER EVENTS
+    match /communicationEvents/{eventId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false; // Append-only audit events
+      allow delete: if isAdmin();
+    }
+
+    // PHASE 8: LoRa MESH TOPOLOGY & NODES
+    match /meshNodes/{nodeId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    // PHASE 8: FIELD SAFETY ALERTS & INCIDENT ESCALATIONS
+    match /fieldSafetyAlerts/{alertId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAdmin() || isExpeditionManager() || isMedicalOfficer();
+      allow delete: if isAdmin();
+    }
+
+    // PHASE 8: WEBGPU & EDGE AI METRICS
+    match /aiInferenceMetrics/{metricId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin() || isScientist();
+    }
+
+    // PHASE 9/10: SATELLITE BROADBAND QUEUE & MESSAGES
+    match /satelliteMessages/{messageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAdmin() || isExpeditionManager();
+      allow delete: if isAdmin();
+    }
+
+    // PHASE 9/10: UAV AUTONOMY & COMMAND AUDIT
+    match /uavCommands/{commandId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() || isExpeditionManager() || isScientist();
+      allow update: if false; // Immutable command audit records
+      allow delete: if isAdmin();
+    }
+
+    // PHASE 9/10: 3D TERRAIN RECONSTRUCTION & GLACIAL HAZARDS
+    match /terrainReconstructions/{reconId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isExpeditionManager() || isScientist();
+      allow delete: if isAdmin();
+    }
+
+    match /crevasseHazards/{hazardId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isExpeditionManager() || isScientist();
+      allow delete: if isAdmin();
+    }
+
+    // ACTIVITY LOGS COLLECTION (Append-only audit trail)
+    match /activityLogs/{logId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      // Logs are immutable once created
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+  }
+}

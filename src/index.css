@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-heading: 'Outfit', 'Inter', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #070d1e;
+    color: #e2e8f0;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+  }
+}
+
+/* Polar Custom Utility Styles */
+.polar-glass {
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(56, 189, 248, 0.15);
+}
+
+.polar-glass-card {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.polar-glass-card:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.polar-glass-input {
+  background: rgba(11, 19, 43, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.polar-glass-input:focus {
+  border-color: #38bdf8;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+}
+
+.polar-gradient-ice {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0c4a6e 100%);
+}
+
+.polar-gradient-cyan {
+  background: linear-gradient(135deg, #0284c7 0%, #06b6d4 100%);
+}
+
+.polar-gradient-accent {
+  background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+}
+
+.polar-glow-cyan {
+  box-shadow: 0 0 25px -5px rgba(56, 189, 248, 0.35);
+}
+
+.polar-glow-red {
+  box-shadow: 0 0 25px -5px rgba(239, 68, 68, 0.4);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0b132b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+  border: 1px solid rgba(56, 189, 248, 0.15);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Radar scanning animation */
+@keyframes radar-sweep {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-radar {
+  animation: radar-sweep 6s linear infinite;
+}
+
+/* Ping pulse animation for live beacons */
+@keyframes polar-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(1.15);
+  }
+}
+
+.animate-polar-pulse {
+  animation: polar-pulse 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
